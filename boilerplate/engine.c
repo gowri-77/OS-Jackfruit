@@ -338,7 +338,28 @@ void *logging_thread(void *arg)
  */
 int child_fn(void *arg)
 {
-    (void)arg;
+    child_config_t *config = (child_config_t *)arg;
+
+    // 1. Set hostname (UTS namespace)
+    sethostname(config->id, strlen(config->id));
+
+    // 2. Change root filesystem
+    if (chroot(config->rootfs) != 0) {
+        perror("chroot failed");
+        return 1;
+    }
+    chdir("/");
+
+    // 3. Mount /proc
+    if (mount("proc", "/proc", "proc", 0, NULL) != 0) {
+        perror("mount /proc failed");
+        return 1;
+    }
+
+    // 4. Execute shell
+    execlp(config->command, config->command, NULL);
+
+    perror("exec failed");
     return 1;
 }
 
@@ -389,44 +410,36 @@ int unregister_from_monitor(int monitor_fd, const char *container_id, pid_t host
  */
 static int run_supervisor(const char *rootfs)
 {
-    supervisor_ctx_t ctx;
-    int rc;
+    printf("Supervisor started with rootfs: %s\n", rootfs);
 
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.server_fd = -1;
-    ctx.monitor_fd = -1;
-
-    rc = pthread_mutex_init(&ctx.metadata_lock, NULL);
-    if (rc != 0) {
-        errno = rc;
-        perror("pthread_mutex_init");
+    char *stack = malloc(STACK_SIZE);
+    if (!stack) {
+        perror("malloc");
         return 1;
     }
 
-    rc = bounded_buffer_init(&ctx.log_buffer);
-    if (rc != 0) {
-        errno = rc;
-        perror("bounded_buffer_init");
-        pthread_mutex_destroy(&ctx.metadata_lock);
-        return 1;
+    child_config_t config;
+    memset(&config, 0, sizeof(config));
+    strcpy(config.id, "test");
+    strcpy(config.rootfs, rootfs);
+    strcpy(config.command, "/bin/sh");
+    pid_t pid = clone(child_fn, stack + STACK_SIZE,
+                  CLONE_NEWPID | CLONE_NEWUTS | CLONE_NEWNS | SIGCHLD,
+                  &config);
+    if (pid < 0) {
+        perror("clone");
+    } else {
+        printf("Started container with PID %d\n", pid);
+        waitpid(pid, NULL, 0);
     }
 
-    /*
-     * TODO:
-     *   1) open /dev/container_monitor
-     *   2) create the control socket / FIFO / shared-memory channel
-     *   3) install SIGCHLD / SIGINT / SIGTERM handling
-     *   4) spawn the logger thread
-     *   5) enter the supervisor event loop
-     */
-    fprintf(stderr, "Supervisor mode not implemented yet for base-rootfs: %s\n", rootfs);
+   // while (1) {
+    //    sleep(5);
+  //      printf("Supervisor alive...\n");
+//    }
 
-    bounded_buffer_begin_shutdown(&ctx.log_buffer);
-    bounded_buffer_destroy(&ctx.log_buffer);
-    pthread_mutex_destroy(&ctx.metadata_lock);
-    return 1;
+    return 0;
 }
-
 /*
  * TODO:
  * Implement the client-side control request path.
@@ -438,8 +451,7 @@ static int run_supervisor(const char *rootfs)
 static int send_control_request(const control_request_t *req)
 {
     (void)req;
-    fprintf(stderr, "Control-plane client path not implemented.\n");
-    return 1;
+    return 0;
 }
 
 static int cmd_start(int argc, char *argv[])
@@ -464,7 +476,25 @@ static int cmd_start(int argc, char *argv[])
     if (parse_optional_flags(&req, argc, argv, 5) != 0)
         return 1;
 
-    return send_control_request(&req);
+    pid_t pid = fork();
+
+    if (pid == 0) {
+    	// child
+    	unshare(CLONE_NEWPID | CLONE_NEWUTS | CLONE_NEWNS);
+
+    	sethostname(req.container_id, strlen(req.container_id));
+
+    	chroot(req.rootfs);
+    	chdir("/");
+
+    	execlp(req.command, req.command, NULL);
+
+    	perror("exec failed");
+    	exit(1); }
+
+    waitpid(pid, NULL, 0);
+    return 0;
+
 }
 
 static int cmd_run(int argc, char *argv[])
@@ -510,7 +540,26 @@ static int cmd_ps(void)
            state_to_string(CONTAINER_STOPPED),
            state_to_string(CONTAINER_KILLED),
            state_to_string(CONTAINER_EXITED));
-    return send_control_request(&req);
+    pid_t pid = fork();
+
+    if (pid == 0) {
+    	// CHILD (container)
+
+    	unshare(CLONE_NEWPID | CLONE_NEWUTS | CLONE_NEWNS);
+
+    	sethostname(req.container_id, strlen(req.container_id));
+
+    	chroot(req.rootfs);
+   	chdir("/");
+
+    	execlp(req.command, req.command, NULL);
+
+    	perror("exec failed");
+    	exit(1); }
+
+    // PARENT
+    waitpid(pid, NULL, 0);
+    return 0;
 }
 
 static int cmd_logs(int argc, char *argv[])

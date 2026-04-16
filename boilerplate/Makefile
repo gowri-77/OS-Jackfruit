@@ -1,41 +1,55 @@
-obj-m += monitor.o
+# ============================================================
+# Makefile — Multi-Container Runtime
+# ============================================================
 
-KDIR := /lib/modules/$(shell uname -r)/build
-PWD := $(shell pwd)
-# If you want host-built workload binaries to run directly inside an Alpine
-# rootfs, you can override this with WORKLOAD_LDFLAGS=-static when your
-# toolchain supports it.
-WORKLOAD_LDFLAGS ?= -static
+CC        = gcc
+CFLAGS    = -Wall -Wextra -g -O2 -D_GNU_SOURCE
+LDFLAGS   = -lpthread
 
-USER_TARGETS := engine memory_hog cpu_hog io_pulse
+KDIR     ?= /lib/modules/$(shell uname -r)/build
+PWD_DIR  := $(shell pwd)
 
-all: $(USER_TARGETS) module
+.PHONY: all clean ci module userspace workloads boilerplate/ci
 
-ci: WORKLOAD_LDFLAGS =
-ci: $(USER_TARGETS)
+# Default: build everything
+all: userspace module workloads
 
-module: monitor.ko
+# ---- User-space runtime ------------------------------------
+userspace: engine
 
 engine: engine.c monitor_ioctl.h
-	gcc -O2 -Wall -Wextra -o engine engine.c -lpthread
+	$(CC) $(CFLAGS) -o $@ engine.c $(LDFLAGS)
 
-memory_hog: memory_hog.c
-	gcc -O2 -Wall $(WORKLOAD_LDFLAGS) -o memory_hog memory_hog.c
+# ---- Workload binaries -------------------------------------
+workloads: cpu_hog memory_hog io_pulse
 
 cpu_hog: cpu_hog.c
-	gcc -O2 -Wall $(WORKLOAD_LDFLAGS) -o cpu_hog cpu_hog.c
+	$(CC) $(CFLAGS) -o $@ cpu_hog.c
+
+memory_hog: memory_hog.c
+	$(CC) $(CFLAGS) -o $@ memory_hog.c
 
 io_pulse: io_pulse.c
-	gcc -O2 -Wall $(WORKLOAD_LDFLAGS) -o io_pulse io_pulse.c
+	$(CC) $(CFLAGS) -o $@ io_pulse.c
+# ---- Kernel module -----------------------------------------
+module: Kbuild
+	$(MAKE) -C $(KDIR) M=$(PWD_DIR) modules
 
-monitor.ko: monitor.c monitor_ioctl.h
-	$(MAKE) -C $(KDIR) M=$(PWD) modules
+Kbuild:
+	@echo "obj-m := monitor.o" > Kbuild
 
+# ---- CI-safe target (GitHub Actions / no kernel headers) ---
+# Builds only user-space; no sudo, module loading, or rootfs required.
+ci: engine workloads
+	@echo "CI build OK (user-space only)"
+
+# Required by project spec: make -C boilerplate ci
+boilerplate/ci: ci
+
+# ---- Clean -------------------------------------------------
 clean:
-	if [ -d "$(KDIR)" ]; then $(MAKE) -C $(KDIR) M=$(PWD) clean; fi
-	rm -f $(USER_TARGETS) *.o *.mod *.mod.c *.symvers *.order
-	rm -f *.log
-	rm -rf logs
-	rm -f /tmp/mini_runtime.sock
+	$(MAKE) -C $(KDIR) M=$(PWD_DIR) clean 2>/dev/null || true
+	rm -f Kbuild Module.symvers modules.order
+	rm -f *.o *.ko *.mod.c *.mod
+	rm -f .*.cmd
 
-.PHONY: all ci module clean
