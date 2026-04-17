@@ -408,35 +408,49 @@ int unregister_from_monitor(int monitor_fd, const char *container_id, pid_t host
  *   - accept control requests and update container state
  *   - reap children and respond to signals
  */
+ pid_t start_container(const char *id, const char *rootfs)
+{
+    child_config_t config;
+    memset(&config, 0, sizeof(config));
+
+    strcpy(config.id, id);
+    strcpy(config.rootfs, rootfs);
+    strcpy(config.command, "/bin/sh");
+
+    void *stack = malloc(STACK_SIZE);
+    if (!stack) {
+        perror("malloc");
+        return -1;
+    }
+
+    pid_t pid = clone(child_fn, stack + STACK_SIZE,
+        CLONE_NEWPID | CLONE_NEWUTS | CLONE_NEWNS | SIGCHLD,
+        &config);
+
+    if (pid < 0) {
+        perror("clone failed");
+        return -1;
+    }
+
+    printf("Container %s started with PID %d\n", id, pid);
+    return pid;
+}
+void handle_sigchld(int sig)
+{
+    while (waitpid(-1, NULL, WNOHANG) > 0);
+}
 static int run_supervisor(const char *rootfs)
 {
     printf("Supervisor started with rootfs: %s\n", rootfs);
 
-    char *stack = malloc(STACK_SIZE);
-    if (!stack) {
-        perror("malloc");
-        return 1;
-    }
+    signal(SIGCHLD, handle_sigchld);
 
-    child_config_t config;
-    memset(&config, 0, sizeof(config));
-    strcpy(config.id, "test");
-    strcpy(config.rootfs, rootfs);
-    strcpy(config.command, "/bin/sh");
-    pid_t pid = clone(child_fn, stack + STACK_SIZE,
-                  CLONE_NEWPID | CLONE_NEWUTS | CLONE_NEWNS | SIGCHLD,
-                  &config);
-    if (pid < 0) {
-        perror("clone");
-    } else {
-        printf("Started container with PID %d\n", pid);
-        waitpid(pid, NULL, 0);
-    }
+    start_container("alpha", "../rootfs-alpha");
+    start_container("beta", "../rootfs-beta");
 
-   // while (1) {
-    //    sleep(5);
-  //      printf("Supervisor alive...\n");
-//    }
+    while (1) {
+        sleep(5);
+    }
 
     return 0;
 }
