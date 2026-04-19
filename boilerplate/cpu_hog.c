@@ -1,50 +1,51 @@
 /*
- * cpu_hog.c - CPU-bound workload for scheduler experiments.
+ * cpu_hog.c — CPU-bound workload for scheduling experiments (Task 5)
  *
- * Usage:
- *   /cpu_hog [seconds]
+ * Usage: ./cpu_hog [seconds]   (default: 30 seconds)
  *
- * The program burns CPU and prints progress once per second so students
- * can compare completion times and responsiveness under different
- * priorities or CPU-affinity settings.
- *
- * If you copy this binary into an Alpine rootfs, make sure it is built in a
- * format that can run there.
+ * Continuously computes a busy loop and periodically prints its progress.
+ * Used to measure CPU share when run alongside other cpu_hog instances
+ * with different nice values or CPU affinities.
  */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <signal.h>
 
-static unsigned int parse_seconds(const char *arg, unsigned int fallback)
-{
-    char *end = NULL;
-    unsigned long value = strtoul(arg, &end, 10);
+static volatile int running = 1;
+static void handle_sig(int s) { (void)s; running = 0; }
 
-    if (!arg || *arg == '\0' || (end && *end != '\0') || value == 0)
-        return fallback;
-    return (unsigned int)value;
-}
+int main(int argc, char *argv[]) {
+    int seconds = 30;
+    if (argc > 1) seconds = atoi(argv[1]);
 
-int main(int argc, char *argv[])
-{
-    const unsigned int duration = (argc > 1) ? parse_seconds(argv[1], 10) : 10;
-    const time_t start = time(NULL);
-    time_t last_report = start;
-    volatile unsigned long long accumulator = 0;
+    signal(SIGTERM, handle_sig);
+    signal(SIGINT,  handle_sig);
 
-    while ((unsigned int)(time(NULL) - start) < duration) {
-        accumulator = accumulator * 1664525ULL + 1013904223ULL;
+    printf("[cpu_hog] PID=%d, running for %ds\n", (int)getpid(), seconds);
+    fflush(stdout);
 
-        if (time(NULL) != last_report) {
-            last_report = time(NULL);
-            printf("cpu_hog alive elapsed=%ld accumulator=%llu\n",
-                   (long)(last_report - start),
-                   accumulator);
+    time_t start = time(NULL);
+    long long count = 0;
+
+    while (running) {
+        /* Busy computation — prevent optimizer from eliminating loop */
+        for (volatile long i = 0; i < 100000L; i++);
+        count++;
+
+        time_t elapsed = time(NULL) - start;
+        if (elapsed >= seconds) break;
+
+        if (count % 500 == 0) {
+            printf("[cpu_hog] elapsed=%lds iterations=%lld\n",
+                   elapsed, count);
             fflush(stdout);
         }
     }
 
-    printf("cpu_hog done duration=%u accumulator=%llu\n", duration, accumulator);
+    time_t total = time(NULL) - start;
+    printf("[cpu_hog] done. total_iterations=%lld elapsed=%lds\n",
+           count, total);
     return 0;
 }
+
