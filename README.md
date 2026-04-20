@@ -4,7 +4,7 @@
 
 | Name | SRN |
 |------|-----|
-| Gowri TN | PES1UG24AM421 |
+| Gowri T N | PES1UG24AM431 |
 | Anjali Arun | PES1UG24AM421 |
 
 ---
