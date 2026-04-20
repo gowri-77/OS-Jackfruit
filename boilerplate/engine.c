@@ -36,8 +36,8 @@
 #define MAX_CONTAINERS   16
 #define MAX_NAME         64
 #define MAX_CMD_ARGS     32
-#define SOCK_PATH        "/tmp/engine_ctrl.sock"
-#define LOG_DIR          "/tmp/engine_logs"
+#define SOCK_PATH        "/tmp/mini_runtime.sock"
+#define LOG_DIR          "logs"
 #define LOG_BUF_SLOTS    256
 #define LOG_SLOT_SIZE    512
 #define MONITOR_DEV      "/dev/container_monitor"
@@ -636,6 +636,11 @@ static void run_client(int argc, char *argv[]) {
                      sizeof(reply) - total - 1, 0)) > 0)
         total += n;
     reply[total] = '\0';
+    if (strncmp(reply, "ERR", 3) == 0) {
+        fprintf(stderr, "%s", reply);
+        close(sock);
+        exit(1);
+    }
     printf("%s", reply);
     close(sock);
 }
