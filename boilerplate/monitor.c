@@ -227,7 +227,7 @@ static int __init monitor_init(void) {
     timer_setup(&monitor_timer, check_limits, 0);
     mod_timer(&monitor_timer, jiffies + msecs_to_jiffies(CHECK_INTERVAL_MS));
 
-    printk(KERN_INFO "container_monitor: loaded, major=%d\n", major_num);
+    printk(KERN_INFO "container_monitor: Module loaded, major=%d\n", major_num);
     return 0;
 }
 
@@ -247,7 +247,7 @@ static void __exit monitor_exit(void) {
     cdev_del(&monitor_cdev);
     class_destroy(monitor_class);
     unregister_chrdev_region(dev_num, 1);
-    printk(KERN_INFO "container_monitor: unloaded\n");
+    printk(KERN_INFO "container_monitor: Module unloaded\n");
 }
 
 module_init(monitor_init);
